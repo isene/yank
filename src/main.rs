@@ -191,10 +191,12 @@ fn watch() {
                 }
                 let text = String::from_utf8_lossy(&prop.value).to_string();
                 let trimmed = text.trim();
-                if trimmed.is_empty() || text.len() > MAX_ENTRY || text == last {
+                if trimmed.is_empty() || text.len() > MAX_ENTRY {
                     continue;
                 }
-                store(&text);
+                if text != last {
+                    store(&text);
+                }
                 let other = if pending == primary { clipboard } else { primary };
                 let _ = conn.set_selection_owner(win, other, x11rb::CURRENT_TIME);
                 let _ = conn.flush();
