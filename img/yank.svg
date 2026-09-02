@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#0a0a14"/>
+    </linearGradient>
+    <linearGradient id="rust" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f74c00"/>
+      <stop offset="100%" style="stop-color:#b7410e"/>
+    </linearGradient>
+  </defs>
+
+  <circle cx="128" cy="128" r="120" fill="url(#bg)" stroke="url(#rust)" stroke-width="3"/>
+
+  <!-- a stack of clipped lines: the history -->
+  <rect x="58" y="70" width="140" height="14" rx="4" fill="#3d5a76"/>
+  <rect x="58" y="94" width="112" height="14" rx="4" fill="#3d5a76"/>
+  <rect x="58" y="118" width="128" height="14" rx="4" fill="url(#rust)"/>
+  <rect x="58" y="142" width="96" height="14" rx="4" fill="#3d5a76"/>
+
+  <!-- the pull: the chosen line yanked out and to the right -->
+  <path d="M192 125 L212 125 L204 117 M212 125 L204 133" fill="none"
+        stroke="#7aa2c0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="128" y="212" font-family="monospace" font-size="24" font-weight="bold"
+        fill="url(#rust)" text-anchor="middle" letter-spacing="3">yank</text>
+  <text x="128" y="230" font-family="monospace" font-size="8" fill="#888"
+        text-anchor="middle">copy once, paste where you were</text>
+</svg>

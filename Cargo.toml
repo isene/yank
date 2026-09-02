@@ -1,0 +1,14 @@
+[package]
+name = "yank"
+version = "0.1.0"
+edition = "2021"
+license = "Unlicense"
+description = "Clipboard history for the Fe2O3 suite: an event-driven watcher and a picker that pastes into the window you came from"
+
+[dependencies]
+crust = { version = "0.1", path = "../crust", package = "fe2o3-crust" }
+x11rb = { version = "0.13", default-features = false, features = ["xfixes"] }
+libc = "0.2"
+
+[profile.release]
+strip = true

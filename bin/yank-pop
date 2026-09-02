@@ -1,0 +1,15 @@
+#!/bin/sh
+# yank-pop — Mod4+v: open the clipboard history in a glass, then paste
+# the chosen entry into the window that had focus before the glass.
+# The paste runs here, after glass has closed, so it never races the
+# terminal's own teardown. The picker leaves ~/.yank/paste on Enter.
+# Focus is read with xprop: xdotool getactivewindow fails under frame.
+hex=$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | grep -oE '0x[0-9a-f]+' | head -1)
+target=$(( ${hex:-0} ))
+flag="$HOME/.yank/paste"
+rm -f "$flag"
+glass --class Yank -- /home/geir/bin/yank
+if [ -e "$flag" ] && [ "$target" -gt 1 ]; then
+    rm -f "$flag"
+    exec /home/geir/bin/yank --paste-into "$target"
+fi
