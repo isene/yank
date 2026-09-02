@@ -21,12 +21,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: yank-linux-aarch64
-          - target: x86_64-apple-darwin
-            os: macos-latest
-            artifact: yank-macos-x86_64
-          - target: aarch64-apple-darwin
-            os: macos-latest
-            artifact: yank-macos-aarch64
 
     steps:
       - uses: actions/checkout@v4
@@ -102,5 +96,3 @@ jobs:
             ## Platforms
             - `yank-linux-x86_64` - Linux (Intel/AMD 64-bit)
             - `yank-linux-aarch64` - Linux (ARM 64-bit, Raspberry Pi)
-            - `yank-macos-x86_64` - macOS (Intel)
-            - `yank-macos-aarch64` - macOS (Apple Silicon)
