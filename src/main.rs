@@ -25,9 +25,11 @@ use std::path::PathBuf;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::xfixes::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, KeyButMask, ClientMessageEvent, ConnectionExt as _, CreateWindowAux, EventMask,
-    WindowClass,
+    Atom, AtomEnum, ClientMessageEvent, ConnectionExt as _, CreateWindowAux, EventMask,
+    KeyButMask, PropMode, SelectionNotifyEvent, SelectionRequestEvent, WindowClass,
+    SELECTION_NOTIFY_EVENT,
 };
+use x11rb::wrapper::ConnectionExt as _;
 use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
@@ -61,7 +63,9 @@ fn claim_single_instance() -> bool {
         }
         let mut addr: libc::sockaddr_un = std::mem::zeroed();
         addr.sun_family = libc::AF_UNIX as u16;
-        let name = b"yank-watch";
+        // One recorder per display: the lock name carries $DISPLAY.
+        let name = format!("yank-watch{}", std::env::var("DISPLAY").unwrap_or_default());
+        let name = name.as_bytes();
         for (i, b) in name.iter().enumerate() {
             addr.sun_path[i + 1] = *b as libc::c_char; // [0] stays NUL: abstract
         }
@@ -88,6 +92,8 @@ fn watch() {
     let utf8 = intern(&conn, b"UTF8_STRING").expect("atom");
     let incr = intern(&conn, b"INCR").expect("atom");
     let dest_prop = intern(&conn, b"YANK_DATA").expect("atom");
+    let targets = intern(&conn, b"TARGETS").expect("atom");
+    let string: Atom = AtomEnum::STRING.into();
 
     // Hidden 1x1 window that receives the converted selection.
     let win = conn.generate_id().expect("id");
@@ -116,6 +122,11 @@ fn watch() {
     conn.flush().ok();
 
     let mut last = read_newest().unwrap_or_default();
+    // The selection this window currently owns, and its text. A mouse
+    // selection is mirrored into CLIPBOARD and a copy into PRIMARY, so
+    // Shift+Insert pastes the last thing taken either way, in every app.
+    let mut owned: Option<(Atom, String)> = None;
+    let mut pending: Atom = clipboard; // which selection the reply is for
     if std::env::var_os("YANK_DEBUG").is_some() {
         eprintln!("yank: root={} win={} clipboard_atom={} dest_prop={}",
                   root, win, clipboard, dest_prop);
@@ -140,6 +151,10 @@ fn watch() {
         }
         match ev {
             Event::XfixesSelectionNotify(x) => {
+                if x.owner == win || x.owner == x11rb::NONE {
+                    continue; // our own mirror, or a release
+                }
+                pending = x.selection;
                 // A mouse selection is claimed while the button may still
                 // be down (Firefox re-claims on every drag step). Wait for
                 // the release so one finished selection is stored, not a
@@ -180,11 +195,58 @@ fn watch() {
                     continue;
                 }
                 store(&text);
+                let other = if pending == primary { clipboard } else { primary };
+                let _ = conn.set_selection_owner(win, other, x11rb::CURRENT_TIME);
+                let _ = conn.flush();
+                owned = Some((other, text.clone()));
                 last = text;
+            }
+            Event::SelectionRequest(r) => serve(&conn, &owned, &r, utf8, string, targets),
+            Event::SelectionClear(c) => {
+                if owned.as_ref().map_or(false, |(sel, _)| *sel == c.selection) {
+                    owned = None;
+                }
             }
             _ => {}
         }
     }
+}
+
+/// Answer a SelectionRequest for the selection this window owns:
+/// TARGETS, UTF8_STRING or STRING; anything else gets property None.
+fn serve(
+    conn: &RustConnection, owned: &Option<(Atom, String)>, r: &SelectionRequestEvent,
+    utf8: Atom, string: Atom, targets: Atom,
+) {
+    let prop = if r.property == x11rb::NONE { r.target } else { r.property };
+    let mut reply = x11rb::NONE;
+    if let Some((sel, text)) = owned {
+        if *sel == r.selection {
+            if r.target == targets {
+                let list = [targets, utf8, string];
+                let _ = conn.change_property32(
+                    PropMode::REPLACE, r.requestor, prop, AtomEnum::ATOM, &list,
+                );
+                reply = prop;
+            } else if r.target == utf8 || r.target == string {
+                let _ = conn.change_property8(
+                    PropMode::REPLACE, r.requestor, prop, r.target, text.as_bytes(),
+                );
+                reply = prop;
+            }
+        }
+    }
+    let ev = SelectionNotifyEvent {
+        response_type: SELECTION_NOTIFY_EVENT,
+        sequence: 0,
+        time: r.time,
+        requestor: r.requestor,
+        selection: r.selection,
+        target: r.target,
+        property: reply,
+    };
+    let _ = conn.send_event(false, r.requestor, EventMask::NO_EVENT, ev);
+    let _ = conn.flush();
 }
 
 /// One file per entry, named by microsecond epoch, pruned to KEEP.

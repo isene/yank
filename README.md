@@ -8,7 +8,9 @@ Clipboard history that pastes back where you were.
 
 Two halves in one binary. A recorder sits on X selection events
 (CLIPBOARD and PRIMARY, so Ctrl+C and mouse selections both count)
-and writes every copy to `~/.yank/hist/`. A picker lists them newest
+and writes every copy to `~/.yank/hist/`. It also keeps the two in
+step: a mouse selection becomes the CLIPBOARD too, and a copy becomes
+PRIMARY, so `Shift+Insert` pastes the last thing taken in every app. A picker lists them newest
 first; Enter puts the one you chose into the window you came from.
 No tray icon, no daemon that polls, nothing running between copies.
 
