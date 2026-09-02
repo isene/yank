@@ -3,7 +3,7 @@
 //! Two halves in one binary:
 //!
 //!   yank --watch     the recorder. Sits on XFixes selection events and
-//!                    writes every CLIPBOARD copy to ~/.yank/hist/, one
+//!                    writes every copy and mouse selection to ~/.yank/hist/, one
 //!                    file per entry, newest kept, capped. Fully
 //!                    event-driven: zero wakeups between copies.
 //!
@@ -25,7 +25,7 @@ use std::path::PathBuf;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::xfixes::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{
-    Atom, AtomEnum, ClientMessageEvent, ConnectionExt as _, CreateWindowAux, EventMask,
+    Atom, AtomEnum, KeyButMask, ClientMessageEvent, ConnectionExt as _, CreateWindowAux, EventMask,
     WindowClass,
 };
 use x11rb::protocol::Event;
@@ -84,6 +84,7 @@ fn watch() {
     };
     let root = conn.setup().roots[screen_num].root;
     let clipboard = intern(&conn, b"CLIPBOARD").expect("atom");
+    let primary: Atom = AtomEnum::PRIMARY.into();
     let utf8 = intern(&conn, b"UTF8_STRING").expect("atom");
     let incr = intern(&conn, b"INCR").expect("atom");
     let dest_prop = intern(&conn, b"YANK_DATA").expect("atom");
@@ -104,11 +105,14 @@ fn watch() {
     }
     // Subscribe on our own window, as Qt does; frame files the
     // subscription against the window given.
-    conn.xfixes_select_selection_input(
-        win, clipboard,
-        xfixes::SelectionEventMask::SET_SELECTION_OWNER,
-    )
-    .expect("select input");
+    // Both selections: Ctrl+C lands in CLIPBOARD, a mouse selection in
+    // PRIMARY. Two subscriptions, two of frame's sixteen slots.
+    for sel in [clipboard, primary] {
+        conn.xfixes_select_selection_input(
+            win, sel, xfixes::SelectionEventMask::SET_SELECTION_OWNER,
+        )
+        .expect("select input");
+    }
     conn.flush().ok();
 
     let mut last = read_newest().unwrap_or_default();
@@ -135,11 +139,27 @@ fn watch() {
             }
         }
         match ev {
-            Event::XfixesSelectionNotify(_) => {
+            Event::XfixesSelectionNotify(x) => {
+                // A mouse selection is claimed while the button may still
+                // be down (Firefox re-claims on every drag step). Wait for
+                // the release so one finished selection is stored, not a
+                // trail of partial ones. Only spins during a drag.
+                if x.selection == primary {
+                    for _ in 0..300 {
+                        let held = conn.query_pointer(root).ok()
+                            .and_then(|c| c.reply().ok())
+                            .map(|r| r.mask.intersects(
+                                KeyButMask::BUTTON1 | KeyButMask::BUTTON2
+                                | KeyButMask::BUTTON3))
+                            .unwrap_or(false);
+                        if !held { break; }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
                 // A new owner: ask for the text. The reply arrives as a
                 // SelectionNotify + property on our window.
                 let _ = conn.convert_selection(
-                    win, clipboard, utf8, dest_prop, x11rb::CURRENT_TIME,
+                    win, x.selection, utf8, dest_prop, x11rb::CURRENT_TIME,
                 );
                 let _ = conn.flush();
             }
@@ -369,7 +389,7 @@ fn main() {
         println!();
         println!("Usage: yank [--watch | --paste-into XID]");
         println!();
-        println!("  --watch          record CLIPBOARD copies to ~/.yank/hist/");
+        println!("  --watch          record CLIPBOARD and PRIMARY to ~/.yank/hist/");
         println!("  (no args)        pick an entry: Enter takes it, d deletes, q quits");
         println!("  --paste-into XID focus XID and send Shift+Insert (yank-pop runs");
         println!("                   this after the picker's terminal has closed)");

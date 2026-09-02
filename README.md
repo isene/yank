@@ -6,7 +6,8 @@ Clipboard history that pastes back where you were.
 
 <img src="img/yank.svg" align="left" width="150" height="150">
 
-Two halves in one binary. A recorder sits on X selection events and
+Two halves in one binary. A recorder sits on X selection events (CLIPBOARD and PRIMARY, so Ctrl+C and
+mouse selections both count) and
 writes every copy to `~/.yank/hist/`. A picker lists them newest
 first; Enter puts the one you chose into the window you came from.
 No tray icon, no daemon that polls, nothing running between copies.

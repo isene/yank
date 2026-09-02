@@ -1,6 +1,6 @@
 [package]
 name = "yank"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "Unlicense"
 description = "Clipboard history for the Fe2O3 suite: an event-driven watcher and a picker that pastes into the window you came from"
