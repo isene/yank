@@ -19,7 +19,7 @@ No tray icon, no daemon that polls, nothing running between copies.
 ```sh
 yank --watch           # the recorder, once per session (autostart it)
 yank                   # the picker
-yank --paste-to XID    # picker; Enter pastes into window XID
+yank --paste-into XID  # focus XID and paste (run by yank-pop)
 ```
 
 In the picker: `↑ ↓` or `j k` select, `Enter` pastes, `d` deletes the
