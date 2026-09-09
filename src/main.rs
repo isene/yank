@@ -398,24 +398,29 @@ fn picker() {
     let (cols, rows) = Crust::terminal_size();
     let mut sel = 0usize;
     loop {
+        let w = cols as usize;
         let mut pane = Pane::new(1, 1, cols, rows, 231, 0);
+        pane.wrap = false;
         let mut out = String::new();
-        out.push_str(&style::styled(
-            &format!(" yank — {} entr{} ", list.len(),
-                     if list.len() == 1 { "y" } else { "ies" }),
-            Some(231), Some(234), "b"));
+        // Title bar across the whole row, rows striped in pairs, the
+        // chosen row in blue. Rows are padded to the width so the colour
+        // reaches the right edge; the pane cuts anything wider.
+        let title = format!(" yank \u{2014} {} entr{}", list.len(),
+                            if list.len() == 1 { "y" } else { "ies" });
+        out.push_str(&style::styled(&format!("{:<w$}", title, w = w), Some(231), Some(240), "b"));
         out.push('\n');
         let body = rows.saturating_sub(2) as usize;
         let top = sel.saturating_sub(body.saturating_sub(1));
-        for (i, (_, t)) in list.iter().enumerate().skip(top).take(body) {
-            let line = format!(" {}", preview(t, cols as usize - 4));
+        for (n, (i, (_, t))) in list.iter().enumerate().skip(top).take(body).enumerate() {
+            let line = format!("{:<w$}", format!(" {}", preview(t, w - 4)), w = w);
             if i == sel {
-                out.push_str(&format!("\x1b[48;5;238m{:<w$}\x1b[49m\n", line,
-                                      w = cols as usize - 2));
+                out.push_str(&style::fb(&line, 231, 18));
+            } else if n % 2 == 1 {
+                out.push_str(&style::fb(&line, 231, 235));
             } else {
                 out.push_str(&line);
-                out.push('\n');
             }
+            out.push('\n');
         }
         pane.set_text(out.trim_end_matches('\n'));
         pane.refresh();
