@@ -422,7 +422,7 @@ fn picker() {
         ];
         for t in 0..2 {
             let width = if t == 0 { w / 2 } else { w - w / 2 };
-            let bg = if t == tab { 239 } else { 236 };
+            let bg = if t == tab { 240 } else { 236 };
             out.push_str(&style::styled(&format!("{:<w$}", names[t], w = width), Some(231), Some(bg), "b"));
         }
         out.push('\n');
