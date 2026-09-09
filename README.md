@@ -24,6 +24,11 @@ yank                   # the picker
 yank --paste-into XID  # focus XID and paste (run by yank-pop)
 ```
 
+The picker has two tabs. The left one is the history. The right one, `kept`,
+holds entries you want for good: press `a` on a history entry to copy it
+there, and it stays until you delete it (`~/.yank/keep/`). `Tab`, `←` `→` or
+`h` `l` switch tabs.
+
 In the picker: `↑ ↓` or `j k` select, `Enter` pastes, `d` deletes the
 entry, `q` quits.
 

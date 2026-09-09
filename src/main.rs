@@ -37,9 +37,15 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEEP: usize = 100; // history entries kept
 const MAX_ENTRY: usize = 65536; // bytes; larger copies are not recorded
 
-fn hist_dir() -> PathBuf {
+fn hist_dir() -> PathBuf { yank_dir("hist") }
+
+/// Entries kept for good: the picker's second tab. Same files as the
+/// history, copied over with `a`, never trimmed.
+fn keep_dir() -> PathBuf { yank_dir("keep") }
+
+fn yank_dir(name: &str) -> PathBuf {
     let d = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/".into()))
-        .join(".yank/hist");
+        .join(".yank").join(name);
     let _ = std::fs::create_dir_all(&d);
     d
 }
@@ -276,8 +282,11 @@ fn read_newest() -> Option<String> {
 }
 
 /// (path, text) newest first.
-fn entries() -> Vec<(PathBuf, String)> {
-    let mut names: Vec<_> = std::fs::read_dir(hist_dir())
+fn entries() -> Vec<(PathBuf, String)> { entries_in(&hist_dir()) }
+
+/// Newest first, by file name (a zero-padded timestamp).
+fn entries_in(dir: &PathBuf) -> Vec<(PathBuf, String)> {
+    let mut names: Vec<_> = std::fs::read_dir(dir)
         .map(|it| it.flatten().map(|e| e.path()).collect::<Vec<_>>())
         .unwrap_or_default();
     names.sort();
@@ -387,8 +396,9 @@ fn paste_into(target: u32) {
 }
 
 fn picker() {
-    let list = entries();
-    if list.is_empty() {
+    let dirs = [hist_dir(), keep_dir()];
+    let mut lists = [entries_in(&dirs[0]), entries_in(&dirs[1])];
+    if lists[0].is_empty() && lists[1].is_empty() {
         println!("yank: no history yet (is `yank --watch` running?)");
         std::thread::sleep(std::time::Duration::from_secs(2));
         return;
@@ -396,24 +406,38 @@ fn picker() {
     Crust::init();
     Crust::set_app_identity("Yank");
     let (cols, rows) = Crust::terminal_size();
-    let mut sel = 0usize;
+    let mut tab = 0usize;      // 0 = history, 1 = kept
+    let mut sel = [0usize; 2];
     loop {
         let w = cols as usize;
         let mut pane = Pane::new(1, 1, cols, rows, 231, 0);
         pane.wrap = false;
         let mut out = String::new();
-        // Title bar across the whole row, rows faintly striped in pairs, the
-        // chosen row in blue. Rows are padded to the width so the colour
-        // reaches the right edge; the pane cuts anything wider.
-        let title = format!(" yank \u{2014} {} entr{}", list.len(),
-                            if list.len() == 1 { "y" } else { "ies" });
-        out.push_str(&style::styled(&format!("{:<w$}", title, w = w), Some(231), Some(236), "b"));
+        // Two tabs across the top row, the open one lighter. Rows are
+        // faintly striped in pairs and the chosen row is blue; every row
+        // is padded to the width so the colour reaches the right edge.
+        let names = [
+            format!(" yank \u{2014} {} entr{}", lists[0].len(), if lists[0].len() == 1 { "y" } else { "ies" }),
+            format!(" kept \u{2014} {}", lists[1].len()),
+        ];
+        for t in 0..2 {
+            let width = if t == 0 { w / 2 } else { w - w / 2 };
+            let bg = if t == tab { 239 } else { 236 };
+            out.push_str(&style::styled(&format!("{:<w$}", names[t], w = width), Some(231), Some(bg), "b"));
+        }
         out.push('\n');
+        let list = &lists[tab];
+        sel[tab] = sel[tab].min(list.len().saturating_sub(1));
+        let cur = sel[tab];
         let body = rows.saturating_sub(2) as usize;
-        let top = sel.saturating_sub(body.saturating_sub(1));
+        let top = cur.saturating_sub(body.saturating_sub(1));
+        if list.is_empty() {
+            out.push_str(if tab == 0 { " (no history)" } else { " (nothing kept: press a on a history entry)" });
+            out.push('\n');
+        }
         for (n, (i, (_, t))) in list.iter().enumerate().skip(top).take(body).enumerate() {
             let line = format!("{:<w$}", format!(" {}", preview(t, w - 4)), w = w);
-            if i == sel {
+            if i == cur {
                 out.push_str(&style::fb(&line, 231, 18));
             } else if n % 2 == 1 {
                 out.push_str(&style::fb(&line, 231, 233));
@@ -426,24 +450,32 @@ fn picker() {
         pane.refresh();
         match Input::getchr(None).as_deref() {
             Some("q") | Some("Q") | Some("ESC") => break,
-            Some("UP") | Some("k") => sel = sel.saturating_sub(1),
+            Some("TAB") | Some("S-TAB") | Some("LEFT") | Some("RIGHT") | Some("h") | Some("l") => tab ^= 1,
+            Some("UP") | Some("k") => sel[tab] = sel[tab].saturating_sub(1),
             Some("DOWN") | Some("j") => {
-                if sel + 1 < list.len() {
-                    sel += 1;
+                if sel[tab] + 1 < lists[tab].len() {
+                    sel[tab] += 1;
                 }
             }
-            Some("ENTER") => {
-                let text = list[sel].1.clone();
+            Some("ENTER") if !lists[tab].is_empty() => {
+                let text = lists[tab][cur].1.clone();
                 own_selections(&text);
                 // The wrapper that opened this terminal pastes after the
                 // terminal has closed; this flag tells it Enter was hit.
                 let _ = std::fs::write(paste_flag(), b"");
                 break;
             }
-            Some("d") => {
-                let _ = std::fs::remove_file(&list[sel].0);
-                Crust::cleanup();
-                return picker(); // reread, simplest
+            // Keep: the history file copied to keep/ under its own name.
+            Some("a") if tab == 0 && !lists[0].is_empty() => {
+                let src = &lists[0][cur].0;
+                if let Some(name) = src.file_name() {
+                    let _ = std::fs::copy(src, dirs[1].join(name));
+                }
+                lists[1] = entries_in(&dirs[1]);
+            }
+            Some("d") if !lists[tab].is_empty() => {
+                let _ = std::fs::remove_file(&lists[tab][cur].0);
+                lists[tab] = entries_in(&dirs[tab]);
             }
             _ => {}
         }
@@ -459,7 +491,8 @@ fn main() {
         println!("Usage: yank [--watch | --paste-into XID]");
         println!();
         println!("  --watch          record CLIPBOARD and PRIMARY to ~/.yank/hist/");
-        println!("  (no args)        pick an entry: Enter takes it, d deletes, q quits");
+        println!("  (no args)        pick an entry: Enter takes it, d deletes, q quits;");
+        println!("                   Tab switches to the kept tab, a keeps a history entry there");
         println!("  --paste-into XID focus XID and send Shift+Insert (yank-pop runs");
         println!("                   this after the picker's terminal has closed)");
         return;
