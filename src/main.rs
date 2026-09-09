@@ -402,12 +402,12 @@ fn picker() {
         let mut pane = Pane::new(1, 1, cols, rows, 231, 0);
         pane.wrap = false;
         let mut out = String::new();
-        // Title bar across the whole row, rows striped in pairs, the
+        // Title bar across the whole row, rows faintly striped in pairs, the
         // chosen row in blue. Rows are padded to the width so the colour
         // reaches the right edge; the pane cuts anything wider.
         let title = format!(" yank \u{2014} {} entr{}", list.len(),
                             if list.len() == 1 { "y" } else { "ies" });
-        out.push_str(&style::styled(&format!("{:<w$}", title, w = w), Some(231), Some(240), "b"));
+        out.push_str(&style::styled(&format!("{:<w$}", title, w = w), Some(231), Some(236), "b"));
         out.push('\n');
         let body = rows.saturating_sub(2) as usize;
         let top = sel.saturating_sub(body.saturating_sub(1));
@@ -416,7 +416,7 @@ fn picker() {
             if i == sel {
                 out.push_str(&style::fb(&line, 231, 18));
             } else if n % 2 == 1 {
-                out.push_str(&style::fb(&line, 231, 235));
+                out.push_str(&style::fb(&line, 231, 233));
             } else {
                 out.push_str(&line);
             }
