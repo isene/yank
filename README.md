@@ -41,6 +41,12 @@ entry, `q` quits.
 quit, and you are back in the list with the bar on the changed entry, so
 `Enter` pastes it. An entry you empty stays as it was.
 
+While an entry is open in the editor, nothing is recorded. An editor
+like scribe copies every piece it deletes, and none of those should land
+in the history.
+
+Text copied again moves to the top. It is not stored twice.
+
 ## Pictures
 
 A copied picture is kept as a PNG: a screenshot, "copy image" in a

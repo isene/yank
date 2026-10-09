@@ -6,7 +6,8 @@
 //!                    writes every copy and mouse selection to ~/.yank/hist/, one
 //!                    file per entry, newest kept, capped. A copied
 //!                    picture is kept as a PNG. Fully event-driven: zero
-//!                    wakeups between copies.
+//!                    wakeups between copies. It records nothing while
+//!                    the picker has an entry open in the editor.
 //!
 //!   yank             the picker. Lists the history newest first; Enter
 //!                    owns CLIPBOARD and PRIMARY with the chosen entry
@@ -259,14 +260,19 @@ fn watch() {
                     if trimmed.is_empty() || text.len() > MAX_ENTRY {
                         break 'text;
                     }
-                    if text != last {
+                    // Nothing is recorded while the picker has an entry
+                    // open in the editor. The copy is still mirrored.
+                    let quiet = editing();
+                    if text != last && !quiet {
                         store(&text);
                     }
                     let other = if pending == primary { clipboard } else { primary };
                     let _ = conn.set_selection_owner(win, other, x11rb::CURRENT_TIME);
                     let _ = conn.flush();
-                    owned = Some((other, text.clone()));
-                    last = text;
+                    if !quiet {
+                        last = text.clone();
+                    }
+                    owned = Some((other, text));
                 }
                 if picture_next && pieces.is_none() {
                     picture_next = false;
@@ -421,19 +427,62 @@ fn trim(dir: &std::path::Path) {
     }
 }
 
+/// Where the picker keeps an entry while the editor has it open.
+fn edit_dir() -> PathBuf {
+    hist_dir().with_file_name("edit")
+}
+
+/// True while a picker has an entry open in the editor. The recorder
+/// records nothing then: scribe copies every piece it deletes, and each
+/// of them became an entry.
+fn editing() -> bool {
+    editing_in(&edit_dir())
+}
+
+/// The folder has the picker's process id. A picker that was killed
+/// with the editor open leaves its folder behind, and the recording
+/// must not stop for good.
+fn editing_in(dir: &std::path::Path) -> bool {
+    std::fs::read_to_string(dir.join("pid"))
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .is_some_and(|pid| std::path::Path::new(&format!("/proc/{}", pid)).exists())
+}
+
+/// The same text or picture again, picked from the history or copied
+/// twice: the file it has moves to the top under its new name, and no
+/// second one is written. True when it was there.
+fn raised(dir: &std::path::Path, picture: bool, data: &[u8], to: &std::path::Path) -> bool {
+    for old in names_in(dir).into_iter().filter(|p| is_picture(p) == picture) {
+        let same_size = std::fs::metadata(&old).is_ok_and(|m| m.len() == data.len() as u64);
+        if same_size && std::fs::read(&old).is_ok_and(|b| b == data) {
+            return std::fs::rename(&old, to).is_ok();
+        }
+    }
+    false
+}
+
 /// One file per entry, named by microsecond epoch, pruned to KEEP.
 fn store(text: &str) {
-    let dir = hist_dir();
+    store_text_in(&hist_dir(), text);
+}
+
+fn store_text_in(dir: &std::path::Path, text: &str) {
     let path = dir.join(format!("{:020}.txt", stamp()));
+    if raised(dir, false, text.as_bytes(), &path) {
+        return;
+    }
     if let Ok(mut f) = std::fs::File::create(&path) {
         let _ = f.write_all(text.as_bytes());
     }
-    trim(&dir);
+    trim(dir);
 }
 
 /// A copied picture, kept as the PNG its owner handed over.
 fn store_picture(data: &[u8]) {
-    store_picture_in(&hist_dir(), data);
+    if !editing() {
+        store_picture_in(&hist_dir(), data);
+    }
 }
 
 fn store_picture_in(dir: &std::path::Path, data: &[u8]) {
@@ -441,15 +490,8 @@ fn store_picture_in(dir: &std::path::Path, data: &[u8]) {
         return; // not a PNG after all
     }
     let path = dir.join(format!("{:020}.png", stamp()));
-    // The same picture again, picked from the history or claimed twice
-    // by its app: the file it has moves to the top, and no second one
-    // is written.
-    for old in names_in(dir).into_iter().filter(|p| is_picture(p)) {
-        let same_size = std::fs::metadata(&old).is_ok_and(|m| m.len() == data.len() as u64);
-        if same_size && std::fs::read(&old).is_ok_and(|b| b == data) {
-            let _ = std::fs::rename(&old, &path);
-            return;
-        }
+    if raised(dir, true, data, &path) {
+        return;
     }
     if std::fs::write(&path, data).is_ok() {
         trim(dir);
@@ -595,16 +637,18 @@ fn edited(before: &str, saved: &str) -> Option<String> {
 /// Open a text entry in the editor: `$EDITOR`, or scribe.
 fn edit_entry(path: &std::path::Path, before: &str) {
     let editor = std::env::var("EDITOR").ok().filter(|e| !e.trim().is_empty());
-    edit_in(&yank_dir("edit"), editor.as_deref().unwrap_or("scribe"), path, before);
+    edit_in(&edit_dir(), editor.as_deref().unwrap_or("scribe"), path, before);
 }
 
 /// The editor gets a copy in a folder of its own, and the folder goes
 /// when it is done. An editor may leave a backup beside the file it
 /// saves, and a backup in the history would be listed as an entry.
+/// The folder also tells the recorder to record nothing meanwhile.
 fn edit_in(dir: &std::path::Path, editor: &str, path: &std::path::Path, before: &str) {
     let copy = dir.join("entry.txt");
     let mut words = editor.split_whitespace(); // "code --wait" is an editor too
     if let (Some(program), true) = (words.next(), std::fs::create_dir_all(dir).is_ok()) {
+        let _ = std::fs::write(dir.join("pid"), std::process::id().to_string());
         if std::fs::write(&copy, before).is_ok() {
             let _ = std::process::Command::new(program).args(words).arg(&copy).status();
             if let Some(after) = std::fs::read_to_string(&copy).ok().and_then(|s| edited(before, &s)) {
@@ -821,6 +865,11 @@ fn picker() {
                     Crust::init();
                     Crust::set_app_identity("Yank");
                     lists[tab] = entries_in(&dirs[tab]);
+                    // The bar stays on the edited entry, also when an
+                    // older recorder put new entries above it meanwhile.
+                    if let Some(i) = lists[tab].iter().position(|(p, _)| *p == path) {
+                        sel[tab] = i;
+                    }
                 }
             }
             Some("d") if !lists[tab].is_empty() => {
@@ -987,6 +1036,42 @@ mod tests {
         edit_in(&d.join("edit"), "/no/such/editor", &entry, "ls -la /tmp");
         assert_eq!(std::fs::read_to_string(&entry).unwrap(), "ls -la /tmp");
         assert!(!d.join("edit").exists());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn nothing_is_recorded_while_an_entry_is_in_the_editor() {
+        let d = scratch("quiet");
+        let dir = d.join("edit");
+        assert!(!editing_in(&dir));
+        let entry = d.join("00000000000000000001.txt");
+        std::fs::write(&entry, "text").unwrap();
+        // An editor that notes whose edit it is in, as the recorder would read it.
+        let script = d.join("editor.sh");
+        std::fs::write(&script, format!("cat \"$(dirname \"$1\")/pid\" > {}/seen\n", d.display())).unwrap();
+        edit_in(&dir, &format!("sh {}", script.display()), &entry, "text");
+        assert_eq!(std::fs::read_to_string(d.join("seen")).unwrap(), std::process::id().to_string());
+        assert!(!editing_in(&dir), "the edit is over");
+        // A picker that was killed left its folder. Its process is gone,
+        // so the recording goes on.
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("pid"), "4194999").unwrap();
+        assert!(!editing_in(&dir));
+        std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
+        assert!(editing_in(&dir));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_same_text_again_moves_to_the_top() {
+        let d = scratch("again");
+        store_text_in(&d, "first");
+        store_text_in(&d, "second");
+        store_text_in(&d, "first");
+        let list = entries_in(&d);
+        assert_eq!(list.len(), 2);
+        assert!(matches!(&list[0].1, What::Text(t) if t == "first"));
+        assert!(matches!(&list[1].1, What::Text(t) if t == "second"));
         let _ = std::fs::remove_dir_all(&d);
     }
 
