@@ -300,6 +300,8 @@ fn watch() {
                     picture_next = false;
                     ask(png, pending);
                 }
+                drop(done);
+                give_back();
             }
             Event::SelectionRequest(r) => serve(&conn, &owned, &r, utf8, string, targets),
             Event::SelectionClear(c) => {
@@ -347,6 +349,16 @@ fn serve(
     };
     let _ = conn.send_event(false, r.requestor, EventMask::NO_EVENT, ev);
     let _ = conn.flush();
+}
+
+/// Hands freed memory back to the system after a big answer. glibc keeps
+/// what was freed, and the recorder stayed 12 MB bigger for the rest of
+/// the session after one 6 MB picture.
+fn give_back() {
+    #[cfg(target_env = "gnu")]
+    unsafe {
+        libc::malloc_trim(0);
+    }
 }
 
 /// An answer that comes in pieces: a picture to keep, or text too big to
