@@ -255,6 +255,9 @@ fn watch() {
                         pieces = Some(Pieces { picture: false, bytes: Vec::new(), keep: false });
                         break 'text;
                     }
+                    if !is_text(prop.format, prop.type_, png) {
+                        break 'text; // another answer was there; its own notice follows
+                    }
                     let text = String::from_utf8_lossy(&prop.value).to_string();
                     let trimmed = text.trim();
                     if trimmed.is_empty() || text.len() > MAX_ENTRY {
@@ -319,6 +322,15 @@ fn watch() {
             _ => {}
         }
     }
+}
+
+/// A text answer is 8-bit data. Two copies made right after each other
+/// (an app that sets both selections, or one twice) are answered by two
+/// programs into the one property. What is there when a text is announced
+/// can then be the other program's list of formats, 32-bit numbers, or a
+/// picture. Read as text, that list became an entry of odd bytes.
+fn is_text(format: u8, type_: Atom, png: Atom) -> bool {
+    format == 8 && type_ != png
 }
 
 /// Answer a SelectionRequest for the selection this window owns:
@@ -1060,6 +1072,16 @@ mod tests {
         std::fs::write(dir.join("pid"), std::process::id().to_string()).unwrap();
         assert!(editing_in(&dir));
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_list_of_formats_is_not_stored_as_text() {
+        let (utf8, png): (Atom, Atom) = (300, 301);
+        assert!(is_text(8, utf8, png));
+        assert!(is_text(8, AtomEnum::STRING.into(), png));
+        assert!(!is_text(32, AtomEnum::ATOM.into(), png), "the formats on offer, from a second copy");
+        assert!(!is_text(8, png, png), "a picture");
+        assert!(!is_text(0, 0, png), "nothing there");
     }
 
     #[test]
