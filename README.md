@@ -36,6 +36,11 @@ there, and it stays until you delete it (`~/.yank/keep/`). `Tab`, `←` `→` or
 In the picker: `↑ ↓` or `j k` select, `Enter` pastes, `d` deletes the
 entry, `q` quits.
 
+`e` opens a text entry in your editor: `$EDITOR`, or
+[scribe](https://github.com/isene/scribe) when that is not set. Save and
+quit, and you are back in the list with the bar on the changed entry, so
+`Enter` pastes it. An entry you empty stays as it was.
+
 ## Pictures
 
 A copied picture is kept as a PNG: a screenshot, "copy image" in a

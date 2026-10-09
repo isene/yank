@@ -11,7 +11,8 @@
 //!   yank             the picker. Lists the history newest first; Enter
 //!                    owns CLIPBOARD and PRIMARY with the chosen entry
 //!                    and leaves ~/.yank/paste as a flag. A picture goes
-//!                    to CLIPBOARD alone.
+//!                    to CLIPBOARD alone. `e` opens a text entry in the
+//!                    editor first.
 //!
 //!   yank --paste-into XID   run by the yank-pop wrapper once the
 //!                    picker's terminal has closed: refocus XID and send
@@ -581,6 +582,39 @@ fn own_selections(text: &str) {
     }
 }
 
+/// What an edit leaves in an entry, from its text before and the text
+/// the editor saved. An editor ends a file with a line end. An entry
+/// that had none gets none, or a pasted command would run by itself in
+/// a shell. None when the entry stays as it was: nothing was changed,
+/// or everything was deleted.
+fn edited(before: &str, saved: &str) -> Option<String> {
+    let after = if before.ends_with('\n') { saved } else { saved.strip_suffix('\n').unwrap_or(saved) };
+    (!after.is_empty() && after != before).then(|| after.to_string())
+}
+
+/// Open a text entry in the editor: `$EDITOR`, or scribe.
+fn edit_entry(path: &std::path::Path, before: &str) {
+    let editor = std::env::var("EDITOR").ok().filter(|e| !e.trim().is_empty());
+    edit_in(&yank_dir("edit"), editor.as_deref().unwrap_or("scribe"), path, before);
+}
+
+/// The editor gets a copy in a folder of its own, and the folder goes
+/// when it is done. An editor may leave a backup beside the file it
+/// saves, and a backup in the history would be listed as an entry.
+fn edit_in(dir: &std::path::Path, editor: &str, path: &std::path::Path, before: &str) {
+    let copy = dir.join("entry.txt");
+    let mut words = editor.split_whitespace(); // "code --wait" is an editor too
+    if let (Some(program), true) = (words.next(), std::fs::create_dir_all(dir).is_ok()) {
+        if std::fs::write(&copy, before).is_ok() {
+            let _ = std::process::Command::new(program).args(words).arg(&copy).status();
+            if let Some(after) = std::fs::read_to_string(&copy).ok().and_then(|s| edited(before, &s)) {
+                let _ = std::fs::write(path, after);
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Flag the picker leaves for the wrapper: "Enter was pressed, paste".
 fn paste_flag() -> PathBuf {
     hist_dir().parent().map(|p| p.join("paste")).unwrap_or_else(|| "/tmp/yank-paste".into())
@@ -774,6 +808,21 @@ fn picker() {
                 }
                 lists[1] = entries_in(&dirs[1]);
             }
+            // Edit: the entry's text in the editor, then back to the
+            // list with the bar still on it, so Enter pastes the new text.
+            Some("e") => {
+                let entry = match lists[tab].get(cur) {
+                    Some((path, What::Text(text))) => Some((path.clone(), text.clone())),
+                    _ => None,
+                };
+                if let Some((path, text)) = entry {
+                    Crust::cleanup();
+                    edit_entry(&path, &text);
+                    Crust::init();
+                    Crust::set_app_identity("Yank");
+                    lists[tab] = entries_in(&dirs[tab]);
+                }
+            }
             Some("d") if !lists[tab].is_empty() => {
                 let _ = std::fs::remove_file(&lists[tab][cur].0);
                 lists[tab] = entries_in(&dirs[tab]);
@@ -796,6 +845,7 @@ fn main() {
         println!();
         println!("  --watch          record CLIPBOARD and PRIMARY to ~/.yank/hist/, copied pictures too");
         println!("  (no args)        pick an entry: Enter takes it, d deletes, q quits;");
+        println!("                   e edits a text entry in $EDITOR (scribe when that is not set);");
         println!("                   Tab switches to the kept tab, a keeps a history entry there");
         println!("  --paste-into XID focus XID and send Shift+Insert, or Ctrl+V for a picture");
         println!("                   (yank-pop runs this after the picker's terminal has closed)");
@@ -909,6 +959,35 @@ mod tests {
         assert_eq!(ago(&at(7200), now), "2 h");
         assert_eq!(ago(&at(3 * 86400), now), "3 d");
         assert_eq!(ago(std::path::Path::new("/h/odd-name.png"), now), "now");
+    }
+
+    #[test]
+    fn an_edit_gives_an_entry_no_line_end_it_did_not_have() {
+        assert_eq!(edited("ls -la", "ls -la /tmp\n").as_deref(), Some("ls -la /tmp"));
+        assert_eq!(edited("one\n", "one\ntwo\n").as_deref(), Some("one\ntwo\n"), "it had one, so it keeps one");
+        assert_eq!(edited("a", "b\n\n").as_deref(), Some("b\n"), "only the editor's own line end goes");
+        assert_eq!(edited("ls -la", "ls -la\n"), None, "saved as it was");
+        assert_eq!(edited("ls -la", ""), None, "emptied: the entry stays");
+        assert_eq!(edited("ls -la", "\n"), None);
+    }
+
+    #[test]
+    fn an_entry_is_edited_on_a_copy_that_is_gone_afterwards() {
+        let d = scratch("edit");
+        let entry = d.join("00000000000000000001.txt");
+        std::fs::write(&entry, "ls -la").unwrap();
+        // An editor that adds to the line, ends the file with a line end
+        // and leaves a backup beside the file it saved.
+        let script = d.join("editor.sh");
+        std::fs::write(&script, "printf ' /tmp\\n' >> \"$1\"; cp \"$1\" \"$1.bak\"\n").unwrap();
+        edit_in(&d.join("edit"), &format!("sh {}", script.display()), &entry, "ls -la");
+        assert_eq!(std::fs::read_to_string(&entry).unwrap(), "ls -la /tmp");
+        assert!(!d.join("edit").exists(), "the copy and the backup are gone");
+        // An editor that is not there changes nothing.
+        edit_in(&d.join("edit"), "/no/such/editor", &entry, "ls -la /tmp");
+        assert_eq!(std::fs::read_to_string(&entry).unwrap(), "ls -la /tmp");
+        assert!(!d.join("edit").exists());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
