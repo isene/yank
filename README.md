@@ -36,8 +36,8 @@ The intended way in: a key that opens the picker in a terminal and
 remembers the window that had focus. With tile:
 
 ```
-exec /home/geir/bin/yank --watch
-bind Mod4+v exec /home/geir/bin/yank-pop
+exec /home/you/bin/yank --watch
+bind Mod4+v exec /home/you/bin/yank-pop
 ```
 
 where `yank-pop` is the two-line script in this repo's `bin/`.

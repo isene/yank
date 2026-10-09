@@ -8,8 +8,13 @@ hex=$(xprop -root _NET_ACTIVE_WINDOW 2>/dev/null | grep -oE '0x[0-9a-f]+' | head
 target=$(( ${hex:-0} ))
 flag="$HOME/.yank/paste"
 rm -f "$flag"
-glass --class Yank -- /home/geir/bin/yank
+# yank is taken from the folder this script is in, else from PATH.
+case $0 in
+    */*) yank=${0%/*}/yank ;;
+    *)   yank=yank ;;
+esac
+glass --class Yank -- "$yank"
 if [ -e "$flag" ] && [ "$target" -gt 1 ]; then
     rm -f "$flag"
-    exec /home/geir/bin/yank --paste-into "$target"
+    exec "$yank" --paste-into "$target"
 fi
