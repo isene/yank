@@ -876,7 +876,7 @@ fn picker() {
             Some("/") => {
                 let mut ask = Pane::new(1, rows, cols, 1, 231, 236);
                 ask.scroll = false;
-                if let Some(q) = ask.ask_or_cancel(" /", "") {
+                if let Some(q) = ask.ask_or_cancel(" /", &filter) {
                     filter = q;
                     lists = [matching(&dirs[0], &filter), matching(&dirs[1], &filter)];
                     sel = [0; 2];

@@ -37,7 +37,8 @@ In the picker: `↑ ↓` or `j k` select, `PgUp` `PgDown` jump a page,
 `Enter` pastes, `d` deletes the entry, `q` quits.
 
 `/` asks for a text and shows only the entries that have it, in any
-case, in both tabs. `Esc` shows them all again.
+case, in both tabs. `/` again starts from the filter, so you can add to
+it; `Ctrl+U` clears it. `Esc` shows them all again.
 
 `e` opens a text entry in your editor: `$EDITOR`, or
 [scribe](https://github.com/isene/scribe) when that is not set. Save and
