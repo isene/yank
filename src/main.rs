@@ -554,6 +554,17 @@ fn entries_in(dir: &PathBuf) -> Vec<(PathBuf, What)> {
         .collect()
 }
 
+/// The entries with `filter` in their text, in any case. An empty
+/// filter keeps them all; a picture has no text, so a filter hides it.
+fn matching(dir: &PathBuf, filter: &str) -> Vec<(PathBuf, What)> {
+    let f = filter.to_lowercase();
+    let mut list = entries_in(dir);
+    if !f.is_empty() {
+        list.retain(|(_, what)| matches!(what, What::Text(t) if t.to_lowercase().contains(&f)));
+    }
+    list
+}
+
 // ---------------------------------------------------------------------------
 // The picker
 // ---------------------------------------------------------------------------
@@ -758,6 +769,7 @@ fn picker() {
     let (cols, rows) = Crust::terminal_size();
     let mut tab = 0usize;      // 0 = history, 1 = kept
     let mut sel = [0usize; 2];
+    let mut filter = String::new(); // set with /, shown in the open tab
     // The way to show a picture, made the first time the bar is on one,
     // and the place a picture is shown at just now.
     let mut display: Option<glow::Display> = None;
@@ -773,10 +785,13 @@ fn picker() {
         // Two tabs across the top row, the open one lighter. Rows are
         // faintly striped in pairs and the chosen row is blue; every row
         // is padded to the width so the colour reaches the right edge.
-        let names = [
+        let mut names = [
             format!(" yank \u{2014} {} entr{}", lists[0].len(), if lists[0].len() == 1 { "y" } else { "ies" }),
             format!(" kept \u{2014} {}", lists[1].len()),
         ];
+        if !filter.is_empty() {
+            names[tab].push_str(&format!("   /{}", filter));
+        }
         for t in 0..2 {
             let width = if t == 0 { w / 2 } else { w - w / 2 };
             let bg = if t == tab { 240 } else { 236 };
@@ -789,7 +804,13 @@ fn picker() {
         let body = rows.saturating_sub(2) as usize;
         let top = cur.saturating_sub(body.saturating_sub(1));
         if list.is_empty() {
-            out.push_str(if tab == 0 { " (no history)" } else { " (nothing kept: press a on a history entry)" });
+            out.push_str(if !filter.is_empty() {
+                " (nothing matches: Esc shows all)"
+            } else if tab == 0 {
+                " (no history)"
+            } else {
+                " (nothing kept: press a on a history entry)"
+            });
             out.push('\n');
         }
         // With the bar on a picture the list has the left half, and the
@@ -834,12 +855,31 @@ fn picker() {
         }
         let key = key.or_else(|| Input::getchr(None));
         match key.as_deref() {
+            // Esc first drops a filter, and quits only when there is none.
+            Some("ESC") if !filter.is_empty() => {
+                filter.clear();
+                lists = [entries_in(&dirs[0]), entries_in(&dirs[1])];
+                sel = [0; 2];
+            }
             Some("q") | Some("Q") | Some("ESC") => break,
             Some("TAB") | Some("S-TAB") | Some("LEFT") | Some("RIGHT") | Some("h") | Some("l") => tab ^= 1,
             Some("UP") | Some("k") => sel[tab] = sel[tab].saturating_sub(1),
             Some("DOWN") | Some("j") => {
                 if sel[tab] + 1 < lists[tab].len() {
                     sel[tab] += 1;
+                }
+            }
+            Some("PgUP") => sel[tab] = sel[tab].saturating_sub(body),
+            Some("PgDOWN") => sel[tab] = (sel[tab] + body).min(lists[tab].len().saturating_sub(1)),
+            // Filter both tabs to the entries with this text in them. An
+            // empty answer shows them all again.
+            Some("/") => {
+                let mut ask = Pane::new(1, rows, cols, 1, 231, 236);
+                ask.scroll = false;
+                if let Some(q) = ask.ask_or_cancel(" /", "") {
+                    filter = q;
+                    lists = [matching(&dirs[0], &filter), matching(&dirs[1], &filter)];
+                    sel = [0; 2];
                 }
             }
             Some("ENTER") if !lists[tab].is_empty() => {
@@ -862,7 +902,7 @@ fn picker() {
                 if let Some(name) = src.file_name() {
                     let _ = std::fs::copy(src, dirs[1].join(name));
                 }
-                lists[1] = entries_in(&dirs[1]);
+                lists[1] = matching(&dirs[1], &filter);
             }
             // Edit: the entry's text in the editor, then back to the
             // list with the bar still on it, so Enter pastes the new text.
@@ -876,7 +916,7 @@ fn picker() {
                     edit_entry(&path, &text);
                     Crust::init();
                     Crust::set_app_identity("Yank");
-                    lists[tab] = entries_in(&dirs[tab]);
+                    lists[tab] = matching(&dirs[tab], &filter);
                     // The bar stays on the edited entry, also when an
                     // older recorder put new entries above it meanwhile.
                     if let Some(i) = lists[tab].iter().position(|(p, _)| *p == path) {
@@ -886,7 +926,7 @@ fn picker() {
             }
             Some("d") if !lists[tab].is_empty() => {
                 let _ = std::fs::remove_file(&lists[tab][cur].0);
-                lists[tab] = entries_in(&dirs[tab]);
+                lists[tab] = matching(&dirs[tab], &filter);
             }
             _ => {}
         }
@@ -907,7 +947,8 @@ fn main() {
         println!("  --watch          record CLIPBOARD and PRIMARY to ~/.yank/hist/, copied pictures too");
         println!("  (no args)        pick an entry: Enter takes it, d deletes, q quits;");
         println!("                   e edits a text entry in $EDITOR (scribe when that is not set);");
-        println!("                   Tab switches to the kept tab, a keeps a history entry there");
+        println!("                   Tab switches to the kept tab, a keeps a history entry there;");
+        println!("                   PgUp PgDown jump a page, / shows only entries with a text in them");
         println!("  --paste-into XID focus XID and send Shift+Insert, or Ctrl+V for a picture");
         println!("                   (yank-pop runs this after the picker's terminal has closed)");
         return;

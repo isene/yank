@@ -33,8 +33,11 @@ has the entries you want for good: press `a` on a history entry to copy it
 there, and it stays until you delete it (`~/.yank/keep/`). `Tab`, `←` `→` or
 `h` `l` switch tabs.
 
-In the picker: `↑ ↓` or `j k` select, `Enter` pastes, `d` deletes the
-entry, `q` quits.
+In the picker: `↑ ↓` or `j k` select, `PgUp` `PgDown` jump a page,
+`Enter` pastes, `d` deletes the entry, `q` quits.
+
+`/` asks for a text and shows only the entries that have it, in any
+case, in both tabs. `Esc` shows them all again.
 
 `e` opens a text entry in your editor: `$EDITOR`, or
 [scribe](https://github.com/isene/scribe) when that is not set. Save and
