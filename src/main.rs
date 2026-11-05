@@ -571,6 +571,13 @@ fn matching(dir: &PathBuf, filter: &str) -> Vec<(PathBuf, What)> {
 
 /// A single list line out of an entry: control characters visible,
 /// newlines folded to ⏎.
+/// The colour of the row `age` places below the newest: white on top,
+/// then a step down the grey ramp for each older entry, to a grey that
+/// still reads well on black.
+fn shade(age: usize) -> u8 {
+    if age == 0 { 231 } else { (256 - age.min(13)) as u8 }
+}
+
 fn preview(t: &str, max: usize) -> String {
     let one: String = t
         .chars()
@@ -604,7 +611,7 @@ fn ago(path: &std::path::Path, now: u128) -> String {
 
 /// The list line of a picture: there is no text to show, so its size
 /// and its age tell one from the next. The picture itself is shown
-/// beside the list while the bar is on it.
+/// beside the list while the arrow is on it.
 fn picture_line(path: &std::path::Path, w: u32, h: u32, bytes: u64, now: u128) -> String {
     let size = if bytes >= 1 << 20 {
         format!("{:.1} MB", bytes as f64 / (1 << 20) as f64)
@@ -770,7 +777,7 @@ fn picker() {
     let mut tab = 0usize;      // 0 = history, 1 = kept
     let mut sel = [0usize; 2];
     let mut filter = String::new(); // set with /, shown in the open tab
-    // The way to show a picture, made the first time the bar is on one,
+    // The way to show a picture, made the first time the arrow is on one,
     // and the place a picture is shown at just now.
     let mut display: Option<glow::Display> = None;
     let mut shown: Option<(u16, u16, u16, u16)> = None;
@@ -782,9 +789,9 @@ fn picker() {
         let mut pane = Pane::new(1, 1, cols, rows, 231, 0);
         pane.wrap = false;
         let mut out = String::new();
-        // Two tabs across the top row, the open one lighter. Rows are
-        // faintly striped in pairs and the chosen row is blue; every row
-        // is padded to the width so the colour reaches the right edge.
+        // Two tabs across the top row, the open one lighter. The newest
+        // entry is white and each older one a shade greyer; the chosen
+        // row is bold with an arrow, as in pointer.
         let mut names = [
             format!(" yank \u{2014} {} entr{}", lists[0].len(), if lists[0].len() == 1 { "y" } else { "ies" }),
             format!(" kept \u{2014} {}", lists[1].len()),
@@ -813,7 +820,7 @@ fn picker() {
             });
             out.push('\n');
         }
-        // With the bar on a picture the list has the left half, and the
+        // With the arrow on a picture the list has the left half, and the
         // picture the right.
         let picture = match list.get(cur) {
             Some((p, What::Picture { .. })) => Some(p.clone()),
@@ -821,24 +828,21 @@ fn picker() {
         };
         let room = if picture.is_some() { w / 2 } else { w };
         let now = stamp();
-        for (n, (i, (p, what))) in list.iter().enumerate().skip(top).take(body).enumerate() {
+        for (i, (p, what)) in list.iter().enumerate().skip(top).take(body) {
             let text = match what {
                 What::Text(t) => preview(t, room.saturating_sub(4).max(1)),
                 What::Picture { w, h, bytes } => picture_line(p, *w, *h, *bytes, now),
             };
-            let line = format!("{:<room$}", format!(" {}", text), room = room);
             if i == cur {
-                out.push_str(&style::fb(&line, 231, 18));
-            } else if n % 2 == 1 {
-                out.push_str(&style::fb(&line, 231, 233));
+                out.push_str(&style::styled(&format!("\u{2192} {}", text), Some(231), None, "b"));
             } else {
-                out.push_str(&line);
+                out.push_str(&style::fg(&format!("  {}", text), shade(i)));
             }
             out.push('\n');
         }
         pane.set_text(out.trim_end_matches('\n'));
         pane.refresh();
-        // A picture is shown once the bar has rested on it. A key that
+        // A picture is shown once the arrow has rested on it. A key that
         // comes at once, Enter straight after opening or a held j, is
         // not kept waiting while a big picture is read and scaled.
         let mut key = None;
@@ -905,7 +909,7 @@ fn picker() {
                 lists[1] = matching(&dirs[1], &filter);
             }
             // Edit: the entry's text in the editor, then back to the
-            // list with the bar still on it, so Enter pastes the new text.
+            // list with the arrow still on it, so Enter pastes the new text.
             Some("e") => {
                 let entry = match lists[tab].get(cur) {
                     Some((path, What::Text(text))) => Some((path.clone(), text.clone())),
@@ -917,7 +921,7 @@ fn picker() {
                     Crust::init();
                     Crust::set_app_identity("Yank");
                     lists[tab] = matching(&dirs[tab], &filter);
-                    // The bar stays on the edited entry, also when an
+                    // The arrow stays on the edited entry, also when an
                     // older recorder put new entries above it meanwhile.
                     if let Some(i) = lists[tab].iter().position(|(p, _)| *p == path) {
                         sel[tab] = i;
@@ -972,6 +976,15 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rows_fade_with_age_to_a_floor() {
+        assert_eq!(shade(0), 231);
+        assert_eq!(shade(1), 255);
+        assert!((1..13).all(|a| shade(a) > shade(a + 1)));
+        assert_eq!(shade(13), 243);
+        assert_eq!(shade(5000), 243);
+    }
+
     use super::*;
 
     /// The start of a PNG of this size, with some bytes after it.

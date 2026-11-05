@@ -33,6 +33,9 @@ has the entries you want for good: press `a` on a history entry to copy it
 there, and it stays until you delete it (`~/.yank/keep/`). `Tab`, `←` `→` or
 `h` `l` switch tabs.
 
+The newest entry is on top in white, and each older one is a shade
+greyer. The picked entry is bold, with an arrow in front.
+
 In the picker: `↑ ↓` or `j k` select, `PgUp` `PgDown` jump a page,
 `Enter` pastes, `d` deletes the entry, `q` quits.
 
@@ -42,7 +45,7 @@ it; `Ctrl+U` clears it. `Esc` shows them all again.
 
 `e` opens a text entry in your editor: `$EDITOR`, or
 [scribe](https://github.com/isene/scribe) when that is not set. Save and
-quit, and you are back in the list with the bar on the changed entry, so
+quit, and you are back in the list with the arrow on the changed entry, so
 `Enter` pastes it. An entry you empty stays as it was.
 
 While an entry is open in the editor, nothing is recorded. An editor
@@ -56,7 +59,7 @@ Text copied again moves to the top. It is not stored twice.
 A copied picture is kept as a PNG: a screenshot, "copy image" in a
 browser, a selection in an image editor. Its row says `picture`, its
 size and its age, and the picture is shown beside the list while the
-bar is on it.
+arrow is on it.
 
 `Enter` puts it back on the clipboard and pastes it with `Ctrl+V`, the
 key a browser, an image editor and Claude Code take a picture on.
