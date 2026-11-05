@@ -34,7 +34,10 @@ there, and it stays until you delete it (`~/.yank/keep/`). `Tab`, `←` `→` or
 `h` `l` switch tabs.
 
 The newest entry is on top in white, and each older one is a shade
-greyer. The picked entry is bold, with an arrow in front.
+greyer. The picked entry is bold, with an arrow in front. A `! command`
+is gold, as in [deck](https://github.com/isene/deck), a link is blue, and
+a path has its `LS_COLORS` colour (from `~/.local/share/lscolors.sh`
+when yank starts without `LS_COLORS`).
 
 In the picker: `↑ ↓` or `j k` select, `PgUp` `PgDown` jump a page,
 `Enter` pastes, `d` deletes the entry, `q` quits.

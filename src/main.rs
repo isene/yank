@@ -25,7 +25,9 @@
 //! Replaces copyq: no tray, no Qt, no selection-sync helpers to hang.
 
 use crust::{style, Crust, Input, Pane};
+use std::collections::HashMap;
 use std::io::Write as _;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::PathBuf;
 use x11rb::connection::{Connection, RequestConnection};
 use x11rb::protocol::xfixes::{self, ConnectionExt as _};
@@ -43,6 +45,8 @@ const KEEP: usize = 100; // history entries kept
 const MAX_ENTRY: usize = 65536; // bytes; larger copies are not recorded
 const KEEP_PICS: usize = 20; // pictures among them: they are big
 const MAX_PIC: usize = 16 << 20; // bytes; a bigger picture is not recorded
+const COMMAND: u8 = 179; // a `! command`, in the colour deck shows it in
+const LINK: u8 = 39; // a link inside any text
 
 fn hist_dir() -> PathBuf { yank_dir("hist") }
 
@@ -578,6 +582,76 @@ fn shade(age: usize) -> u8 {
     if age == 0 { 231 } else { (256 - age.min(13)) as u8 }
 }
 
+/// A text row in colours by what the entry is: a `! command` in deck's
+/// colour, a path in its LS_COLORS colour, and each link in blue inside
+/// any other text. `base` is the row's own colour, set again after each
+/// link; `sel` keeps the picked row bold under a colour of its own.
+fn paint(t: &str, line: &str, base: &str, sel: bool, ls: &mut Option<HashMap<String, String>>) -> String {
+    let t = t.trim();
+    let bold = if sel { style::BOLD } else { "" };
+    if t.starts_with("! ") {
+        return format!("{}{bold}{line}", style::set_fg(COMMAND));
+    }
+    if (t.starts_with('/') || t.starts_with("~/")) && !t.contains('\n') {
+        let code = path_colour(t, ls.get_or_insert_with(ls_colors));
+        if !code.is_empty() {
+            return format!("{code}{bold}{line}");
+        }
+    }
+    let mut out = String::from(base);
+    let mut rest = line;
+    while let Some(at) = ["https://", "http://"].iter().filter_map(|s| rest.find(s)).min() {
+        let end = rest[at..].find(|c: char| c.is_whitespace() || c == '⏎').map_or(rest.len(), |n| at + n);
+        out.push_str(&rest[..at]);
+        out.push_str(&style::set_fg(LINK));
+        out.push_str(&rest[at..end]);
+        out.push_str(base);
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The LS_COLORS table, from the variable or else from
+/// ~/.local/share/lscolors.sh: yank opens from a key, and the window
+/// manager that starts it never read a shell profile.
+fn ls_colors() -> HashMap<String, String> {
+    let mut val = std::env::var("LS_COLORS").unwrap_or_default();
+    if val.len() < 32 {
+        let file = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share/lscolors.sh");
+        if let Some(body) = std::fs::read_to_string(file).ok().and_then(|t| t.split('\'').nth(1).map(String::from)) {
+            val = body;
+        }
+    }
+    val.split(':').filter_map(|e| e.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect()
+}
+
+/// The LS_COLORS colour of a copied path, as pointer shows it: a link,
+/// a folder, the extension, a program. Empty when the table has none.
+fn path_colour(t: &str, ls: &HashMap<String, String>) -> String {
+    let p = match t.strip_prefix("~/") {
+        Some(rest) => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(rest),
+        None => PathBuf::from(t),
+    };
+    let m = std::fs::symlink_metadata(&p).ok();
+    let mut keys = Vec::new();
+    if let Some(m) = &m {
+        if m.file_type().is_symlink() {
+            keys.push("ln".to_string());
+        } else if m.is_dir() {
+            keys.push("di".to_string());
+        }
+    }
+    if let Some(e) = p.extension().and_then(|e| e.to_str()) {
+        keys.push(format!("*.{e}"));
+        keys.push(format!("*.{}", e.to_lowercase()));
+    }
+    if m.is_some_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0) {
+        keys.push("ex".to_string());
+    }
+    keys.iter().find_map(|k| ls.get(k)).map(|c| style::sgr(c)).unwrap_or_default()
+}
+
 fn preview(t: &str, max: usize) -> String {
     let one: String = t
         .chars()
@@ -780,6 +854,8 @@ fn picker() {
     // The way to show a picture, made the first time the arrow is on one,
     // and the place a picture is shown at just now.
     let mut display: Option<glow::Display> = None;
+    // LS_COLORS, read the first time a path is in view.
+    let mut ls: Option<HashMap<String, String>> = None;
     let mut shown: Option<(u16, u16, u16, u16)> = None;
     loop {
         let w = cols as usize;
@@ -833,11 +909,17 @@ fn picker() {
                 What::Text(t) => preview(t, room.saturating_sub(4).max(1)),
                 What::Picture { w, h, bytes } => picture_line(p, *w, *h, *bytes, now),
             };
-            if i == cur {
-                out.push_str(&style::styled(&format!("\u{2192} {}", text), Some(231), None, "b"));
+            let sel = i == cur;
+            let (mark, base) = if sel {
+                ("\u{2192} ", format!("{}{}", style::BOLD, style::set_fg(231)))
             } else {
-                out.push_str(&style::fg(&format!("  {}", text), shade(i)));
-            }
+                ("  ", style::set_fg(shade(i)))
+            };
+            let body = match what {
+                What::Text(t) => paint(t, &text, &base, sel, &mut ls),
+                What::Picture { .. } => text,
+            };
+            out.push_str(&format!("{base}{mark}{body}{}", style::RESET));
             out.push('\n');
         }
         pane.set_text(out.trim_end_matches('\n'));
@@ -983,6 +1065,19 @@ mod tests {
         assert!((1..13).all(|a| shade(a) > shade(a + 1)));
         assert_eq!(shade(13), 243);
         assert_eq!(shade(5000), 243);
+    }
+
+    #[test]
+    fn rows_are_coloured_by_what_they_are() {
+        let base = style::set_fg(250);
+        let mut ls = Some(HashMap::from([("di".to_string(), "38;5;111".to_string()), ("*.png".to_string(), "35".to_string())]));
+        let cmd = paint("! /tmp/x.sh", "! /tmp/x.sh", &base, false, &mut ls);
+        assert!(cmd.starts_with(&style::set_fg(COMMAND)));
+        let link = paint("see https://a.org/x now", "see https://a.org/x now", &base, false, &mut ls);
+        assert_eq!(link, format!("{base}see {}https://a.org/x{base} now", style::set_fg(LINK)));
+        assert!(paint("/tmp", "/tmp", &base, false, &mut ls).starts_with(&style::sgr("38;5;111")));
+        assert!(paint("/no/such/a.png", "/no/such/a.png", &base, false, &mut ls).starts_with(&style::sgr("35")));
+        assert_eq!(paint("plain words", "plain words", &base, false, &mut ls), format!("{base}plain words"));
     }
 
     use super::*;
