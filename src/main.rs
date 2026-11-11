@@ -163,6 +163,9 @@ fn watch() {
     // Shift+Insert pastes the last thing taken either way, in every app.
     let mut owned: Option<(Atom, String)> = None;
     let mut pending: Atom = clipboard; // which selection the reply is for
+    let mut clip_owner: u32 = x11rb::NONE; // the window that made the last copy
+    let mut secret_owner: u32 = x11rb::NONE; // that window, when the copy is a password
+    let mut asked = false; // the last copy has not said what it is yet
     if std::env::var_os("YANK_DEBUG").is_some() {
         eprintln!("yank: root={} win={} clipboard_atom={} dest_prop={}",
                   root, win, clipboard, dest_prop);
@@ -197,7 +200,18 @@ fn watch() {
                 // A copy can be a picture. Ask what is on offer first.
                 // A mouse selection is text, and is asked for as before.
                 if x.selection == clipboard {
+                    clip_owner = x.owner;
+                    secret_owner = x11rb::NONE;
+                    asked = true;
                     ask(targets, clipboard);
+                    continue;
+                }
+                // A password manager takes the mouse selection with the
+                // same window, so a terminal can paste the password. It
+                // is left alone like the copy. While the copy has not
+                // said what it is, the selection is the same thing from
+                // the same window, and the copy covers it.
+                if x.owner == secret_owner || (asked && x.owner == clip_owner) {
                     continue;
                 }
                 // A mouse selection is claimed while the button may still
@@ -229,7 +243,9 @@ fn watch() {
                     take(4096).and_then(|p| p.value32().map(|v| v.collect()))
                 };
                 // A password is never asked for, so never kept or mirrored.
+                asked = false;
                 if is_secret(offered.as_deref(), secret) {
+                    secret_owner = clip_owner;
                     continue;
                 }
                 let (text, picture) = wanted(offered.as_deref(), utf8, png);
