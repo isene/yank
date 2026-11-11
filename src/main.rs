@@ -139,6 +139,8 @@ fn watch() {
     conn.flush().ok();
 
     let png = intern(&conn, b"image/png").expect("atom");
+    // What a password manager (vault, KeePassXC) marks a password with.
+    let secret = intern(&conn, b"x-kde-passwordManagerHint").expect("atom");
     // One request at a time, each answered into the same property.
     let ask = |target: Atom, sel: Atom| {
         let _ = conn.convert_selection(win, sel, target, dest_prop, x11rb::CURRENT_TIME);
@@ -226,6 +228,10 @@ fn watch() {
                 } else {
                     take(4096).and_then(|p| p.value32().map(|v| v.collect()))
                 };
+                // A password is never asked for, so never kept or mirrored.
+                if is_secret(offered.as_deref(), secret) {
+                    continue;
+                }
                 let (text, picture) = wanted(offered.as_deref(), utf8, png);
                 picture_next = text && picture;
                 if text {
@@ -401,6 +407,11 @@ fn wanted(offered: Option<&[Atom]>, utf8: Atom, png: Atom) -> (bool, bool) {
     let picture = offered.is_some_and(|o| o.contains(&png));
     let text = offered.is_none_or(|o| o.contains(&utf8)) || !picture;
     (text, picture)
+}
+
+/// True when the copy says it is a password.
+fn is_secret(offered: Option<&[Atom]>, secret: Atom) -> bool {
+    offered.is_some_and(|o| o.contains(&secret))
 }
 
 /// Microseconds since 1970: the name of an entry, so names sort by age.
@@ -1108,6 +1119,11 @@ mod tests {
         // An owner that offers neither, or will not say: text, as before.
         assert_eq!(wanted(Some(&[targets, html]), utf8, png), (true, false));
         assert_eq!(wanted(None, utf8, png), (true, false));
+        // A password manager's copy carries its mark beside the text.
+        let secret = 9;
+        assert!(is_secret(Some(&[targets, utf8, secret]), secret));
+        assert!(!is_secret(Some(&[targets, utf8]), secret));
+        assert!(!is_secret(None, secret));
     }
 
     #[test]

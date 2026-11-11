@@ -98,6 +98,13 @@ picker.
 A picture goes to CLIPBOARD alone, since a terminal pastes PRIMARY as
 text, and the key sent is `Ctrl+V`.
 
+## Passwords stay out
+
+A password manager marks what it copies as a password
+(`x-kde-passwordManagerHint`). yank keeps no such copy, in the list or
+on disk. [vault](https://github.com/isene/vault) sets the mark, and so
+do KeePassXC and Bitwarden.
+
 ## Why not copyq
 
 copyq worked until it did not: its selection-sync helpers hang under a
